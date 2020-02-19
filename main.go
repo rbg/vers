@@ -1,5 +1,7 @@
 package main
 
+import "github.com/rbg/vers/cmd"
+
 // Copyright © 2020 Robert B Gordon <rbg@h9k.io>
 
 // Permission is hereby granted, free of charge, to any person obtaining a copy
@@ -19,8 +21,6 @@ package main
 // LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
-
-import "github.com/h9k-io/utils/vers/cmd"
 
 func main() {
 	cmd.Execute()

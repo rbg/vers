@@ -27,7 +27,7 @@ import (
 	"strings"
 
 	"github.com/apex/log"
-	"github.com/h9k-io/utils/vers/ventry"
+	"github.com/rbg/vers/ventry"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 )
