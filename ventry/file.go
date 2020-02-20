@@ -38,7 +38,7 @@ import (
 )
 
 // writeVersionFile updates the version file info
-func writeVersionFile(path string, info *Entries) error {
+func writeVersionFile(path string, info *VFile) error {
 	var bytes []byte
 
 	log.Debugf("writeVersionFile: %+#v", info)
@@ -73,8 +73,9 @@ func writeVersionFile(path string, info *Entries) error {
 }
 
 // readVersionFile gets the version file info
-func readVersionFile(path string) (Entries, error) {
-	info := make(Entries)
+func readVersionFile(path string) (*VFile, error) {
+	var info VFile
+
 	p, err := filepath.Abs(path)
 	if err != nil {
 		return nil, err
@@ -100,7 +101,7 @@ func readVersionFile(path string) (Entries, error) {
 	default:
 		return nil, fmt.Errorf("unsupported file type")
 	}
-	return info, nil
+	return &info, nil
 }
 
 // Open a version entries file.
@@ -123,7 +124,10 @@ func Open(path string, creat bool) (*VEntry, error) {
 	defer f.Close()
 	ve.path = p
 	ve.lck = flock.New(p + ".lck")
-	ve.ent = make(Entries)
+	ve.ent = &VFile{
+		Version: make(Entries),
+		Prev:    make(Rollback),
+	}
 	log.Debugf("Open(): path->%s VEntry->%+#v", path, ve)
 	return &ve, nil
 }
@@ -141,13 +145,20 @@ func (v *VEntry) LPath() string {
 // Add will update/add an entry
 func (v *VEntry) Add(name string, ent *Vers) {
 	log.Debugf("Add(): enrty->%s values->%+#v", name, ent)
-	v.ent[name] = ent
+	// push current values to history
+	if ve, ok := v.ent.Version[name]; ok {
+		v.ent.Prev[name] = *ve
+	}
+	v.ent.Version[name] = ent
 }
 
 // Rm will remove an entry
 func (v *VEntry) Rm(name string) {
-	if _, ok := v.ent[name]; ok {
-		delete(v.ent, name)
+	if _, ok := v.ent.Version[name]; ok {
+		delete(v.ent.Version, name)
+	}
+	if _, ok := v.ent.Prev[name]; ok {
+		delete(v.ent.Prev, name)
 	}
 }
 
@@ -158,11 +169,11 @@ func (v *VEntry) Dump(format string) error {
 	case "str":
 		fallthrough
 	case "shell":
-		for name, _ := range v.ent {
+		for name, _ := range v.ent.Version {
 			v.Print(name, format)
 		}
 	case "json":
-		out, err := json.MarshalIndent(v.ent, "", "   ")
+		out, err := json.MarshalIndent(v.ent.Version, "", "   ")
 		if err != nil {
 			return err
 		}
@@ -170,7 +181,7 @@ func (v *VEntry) Dump(format string) error {
 	case "yml":
 		fallthrough
 	case "yaml":
-		out, err := yaml.Marshal(v.ent)
+		out, err := yaml.Marshal(v.ent.Version)
 		if err != nil {
 			return err
 		}
@@ -183,7 +194,7 @@ func (v *VEntry) Dump(format string) error {
 
 // Print will dump name(d) entries
 func (v *VEntry) Print(name, format string) error {
-	ve, ok := v.ent[name]
+	ve, ok := v.ent.Version[name]
 	if !ok {
 		return fmt.Errorf("%s; does not exist", name)
 	}
@@ -251,7 +262,7 @@ func (v *VEntry) Write(retry int) error {
 		}
 		if ok {
 			defer v.lck.Unlock()
-			return writeVersionFile(v.path, &v.ent)
+			return writeVersionFile(v.path, v.ent)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -271,10 +282,12 @@ func (v *VEntry) Bump(name, what string) error {
 		if ok {
 			defer v.lck.Unlock()
 			v.ent, err = readVersionFile(v.path)
-			ve, ok := v.ent[name]
+			ve, ok := v.ent.Version[name]
 			if !ok {
 				return fmt.Errorf("%s; does not exist", name)
 			}
+			// push current values to history
+			v.ent.Prev[name] = *ve
 			switch what {
 			case "major":
 				ve.Major++
@@ -288,7 +301,36 @@ func (v *VEntry) Bump(name, what string) error {
 			default:
 				return errors.New("Invalid bump setting")
 			}
-			return writeVersionFile(v.path, &v.ent)
+			return writeVersionFile(v.path, v.ent)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	log.Debugf("Bump(): did not lock file", v.Path())
+	return errors.New("Did not obtain lock")
+}
+
+// Undo restore previous value
+func (v *VEntry) Undo(name string) error {
+	var rt int
+	for rt < 10 {
+		rt++
+		ok, err := v.lck.TryLock()
+		if err != nil {
+			return err
+		}
+		if ok {
+			defer v.lck.Unlock()
+			v.ent, err = readVersionFile(v.path)
+			if _, ok := v.ent.Version[name]; !ok {
+				return fmt.Errorf("%s; does not exist", name)
+			}
+
+			if ve, ok := v.ent.Prev[name]; ok {
+				v.ent.Version[name] = &ve
+				delete(v.ent.Prev, name)
+				return writeVersionFile(v.path, v.ent)
+			}
+			return fmt.Errorf("%s; previous value does not exist", name)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
@@ -308,12 +350,12 @@ func (v *VEntry) Delete(name string) error {
 		if ok {
 			defer v.lck.Unlock()
 			v.ent, err = readVersionFile(v.path)
-			_, ok := v.ent[name]
+			_, ok := v.ent.Version[name]
 			if !ok {
 				return fmt.Errorf("%s; does not exist", name)
 			}
 			v.Rm(name)
-			return writeVersionFile(v.path, &v.ent)
+			return writeVersionFile(v.path, v.ent)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
