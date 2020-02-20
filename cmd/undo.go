@@ -23,34 +23,46 @@ package cmd
 import (
 	"fmt"
 
+	"github.com/apex/log"
+	"github.com/rbg/vers/ventry"
 	"github.com/spf13/cobra"
+	"github.com/spf13/viper"
 )
 
-// rollbackCmd represents the rollback command
-var rollbackCmd = &cobra.Command{
-	Use:   "rollback",
-	Short: "A brief description of your command",
-	Long: `A longer description that spans multiple lines and likely contains examples
-and usage of using your command. For example:
-
-Cobra is a CLI library for Go that empowers applications.
-This application is a tool to generate the needed files
-to quickly create a Cobra application.`,
-	Run: func(cmd *cobra.Command, args []string) {
-		fmt.Println("rollback called")
+// undoCmd represents the undo command
+var undoCmd = &cobra.Command{
+	Use:   "undo",
+	Short: "Undo last set or bump for entry",
+	Long:  "Undo last set or bump for entry",
+	Args: func(cmd *cobra.Command, args []string) error {
+		if viper.GetBool(DEBUG) {
+			log.SetLevel(log.DebugLevel)
+		}
+		if len(viper.GetString(VFILE)) == 0 {
+			return fmt.Errorf("you must supply the .json or .yaml version file pathname (--%s)", VFILE)
+		}
+		if len(viper.GetString(ENTRY)) == 0 {
+			return fmt.Errorf("you must supply the entry name (--%s)", ENTRY)
+		}
+		return nil
 	},
+	Run: undo,
 }
 
 func init() {
-	RootCmd.AddCommand(rollbackCmd)
+	RootCmd.AddCommand(undoCmd)
+}
 
-	// Here you will define your flags and configuration settings.
+func undo(cmd *cobra.Command, args []string) {
 
-	// Cobra supports Persistent Flags which will work for this command
-	// and all subcommands, e.g.:
-	// rollbackCmd.PersistentFlags().String("foo", "", "A help for foo")
-
-	// Cobra supports local flags which will only run when this command
-	// is called directly, e.g.:
-	// rollbackCmd.Flags().BoolP("toggle", "t", false, "Help message for toggle")
+	vp, err := ventry.Open(viper.GetString(VFILE), false)
+	if err != nil {
+		log.Fatalf("Open failed on %s; %s", viper.GetString(VFILE), err)
+	}
+	defer vp.Close()
+	if err = vp.Undo(viper.GetString(ENTRY)); err != nil {
+		log.Infof("Undo failed on %s; %s", viper.GetString(VFILE), err)
+		return
+	}
+	vp.Print(viper.GetString(ENTRY), "str")
 }
