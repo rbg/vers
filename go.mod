@@ -7,6 +7,6 @@ require (
 	github.com/gofrs/flock v0.7.1
 	github.com/spf13/cobra v1.8.1
 	github.com/spf13/viper v1.6.2
-	golang.org/x/sys v0.0.0-20200217220822-9197077df867
+	golang.org/x/sys v0.21.0
 	gopkg.in/yaml.v2 v2.2.8
 )
